@@ -42,30 +42,28 @@ pipeline {
         }
         
         stage('Build and Push to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh "docker build -t ${USER}/node-full-stack-app:latest -f backend/Dockerfile ."
-                    sh "docker login -u ${USER} -p ${PASS}"
-                    sh "docker push ${USER}/node-full-stack-app:latest"
-                }
-            }
+    steps {
+        withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+            sh "docker build -t Prudhvi-dock-hub/node-full-stack-app:latest -f backend/Dockerfile ."
+            sh "docker login -u ${USER} -p ${PASS}"
+            sh "docker push Prudhvi-dock-hub/node-full-stack-app:latest"
         }
-        
-        stage('TRIVY Docker Image Scan') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh "trivy image --exit-code 0 --no-progress ${USER}/node-full-stack-app:latest"
-                }
-            }
-        }
-        
-        stage('Deploy to Docker Container') {
-            steps {
-                sh 'docker stop node-full-stack-app || true'
-                sh 'docker rm node-full-stack-app || true'
-                sh "docker run -d --name node-full-stack-app -p 4000:4000 ${USER}/node-full-stack-app:latest"
-            }
-        }
+    }
+}
+
+stage('TRIVY Docker Image Scan') {
+    steps {
+        sh "trivy image --exit-code 0 --no-progress Prudhvi-dock-hub/node-full-stack-app:latest"
+    }
+}
+
+stage('Deploy to Docker Container') {
+    steps {
+        sh 'docker stop node-full-stack-app || true'
+        sh 'docker rm node-full-stack-app || true'
+        sh 'docker run -d --name node-full-stack-app -p 4000:4000 Prudhvi-dock-hub/node-full-stack-app:latest'
+    }
+}
         
         stage('Clean up Containers') {
             steps {
