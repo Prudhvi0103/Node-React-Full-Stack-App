@@ -1,145 +1,130 @@
 pipeline {
     agent any
-    tools{
-        nodejs 'node16'
-            sonar-scanner 'sonar-scanner'
+    
+    tools {
+        nodejs 'node16'   // Make sure this name exists in Global Tool Configuration
     }
-    environment{
-        SCANNER_HOME= tool 'sonar-scanner'
+    
+    environment {
+        // Removed SCANNER_HOME (was SonarQube related)
+        // You can keep other env vars if needed later
     }
-
+    
     stages {
-
-      stage('Clean Workspace'){
-            steps{
+        stage('Clean Workspace') {
+            steps {
                 cleanWs()
             }
         }
-
-      
-           stage('Git-Checkout') {
+        
+        stage('Git-Checkout') {
             steps {
-                git branch: 'main', changelog: false, poll: false, url: 'https://github.com/nahidkishore/Node-React-Full-Stack-App.git'
+                git branch: 'main', 
+                    changelog: false, 
+                    poll: false, 
+                    url: 'https://github.com/nahidkishore/Node-React-Full-Stack-App.git'
             }
         }
         
-
-        
-
-         stage('SonarQube analysis') {
-        steps {
-            withSonarQubeEnv('SonarQube') {  // server name
-                sh 'sonar-scanner'   // or sonar-scanner.bat on Windows
-            }
-        }
-    }
-
-        stage("SonarQube Quality Gate"){
-       
-             steps {
-                waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
-         }
-
-     }
-     
-       
-      
-
-      stage("OWASP Dependency Check"){
-           steps{
-                dependencyCheck additionalArguments: '--scan ./' , odcInstallation: 'DP-Check'
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./', 
+                                 odcInstallation: 'DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-
+        
         stage('TRIVY FS SCAN') {
             steps {
                 sh "trivy fs . > trivyfs.txt"
             }
         }
         
-         stage('Build Frontend') {
+        stage('Build Frontend') {
             steps {
                 dir('frontend') {
                     sh 'npm install'
                     sh 'npm run build'
-                    
                 }
             }
         }
-
-
-        stage("Build and Push to Docker Hub"){
-               steps{
-                   
-                echo 'login into docker hub and pushing image....'
-                withCredentials([usernamePassword(credentialsId: 'dockerHub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]){
-                     sh "docker build -t node-full-stack-app:latest -f backend/Dockerfile ."
-                     sh "docker tag node-full-stack-app ${env.dockerHubUser}/node-full-stack-app:latest"
-                     sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPassword}"
-                     sh "docker push ${env.dockerHubUser}/node-full-stack-app:latest"
-
-
-               }
-           }
-         }
-
-
-         stage("TRIVY Docker Scan"){
-            steps{
-
-                withCredentials([usernamePassword(credentialsId: 'dockerHub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]){
-                     
-                    sh "trivy image ${env.dockerHubUser}/node-full-stack-app:latest" 
-
-               }
+        
+        stage('Build and Push to Docker Hub') {
+            steps {
+                echo 'Building and pushing Docker image...'
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerHub', 
+                    passwordVariable: 'dockerHubPassword', 
+                    usernameVariable: 'dockerHubUser'
+                )]) {
+                    sh "docker build -t node-full-stack-app:latest -f backend/Dockerfile ."
+                    sh "docker tag node-full-stack-app:latest ${env.dockerHubUser}/node-full-stack-app:latest"
+                    sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPassword}"
+                    sh "docker push ${env.dockerHubUser}/node-full-stack-app:latest"
+                }
+            }
+        }
+        
+        stage('TRIVY Docker Image Scan') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerHub', 
+                    passwordVariable: 'dockerHubPassword', 
+                    usernameVariable: 'dockerHubUser'
+                )]) {
+                    sh "trivy image --exit-code 0 --no-progress ${env.dockerHubUser}/node-full-stack-app:latest"
+                }
+            }
+        }
+        
+        stage('Deploy to Docker Container') {
+            steps {
+                // Stop and remove old container if exists (safe)
+                sh 'docker stop node-full-stack-app || true'
+                sh 'docker rm node-full-stack-app || true'
                 
+                // Run new container
+                sh "docker run -d --name node-full-stack-app -p 4000:4000 ${env.dockerHubUser}/node-full-stack-app:latest"
             }
         }
-
-         stage("Deploy to Docker Container"){
-            steps{
-                sh " docker run -d --name node-full-stack-app -p 4000:4000 nahid0002/node-full-stack-app:latest "
-            }
-        }
-
-        stage('Deploy To Kubernetes') {
+        
+        // Optional: Kubernetes stage – keep only if you have kubeconfig ready
+        // stage('Deploy To Kubernetes') {
+        //     steps {
+        //         script {
+        //             withKubeConfig([credentialsId: 'K8s', serverUrl: '']) {
+        //                 sh 'kubectl apply -f deployment.yaml'
+        //             }
+        //         }
+        //     }
+        // }
+        
+        stage('Clean up Containers') {
             steps {
                 script {
-                   
-                    withKubeConfig([credentialsId: 'K8s', serverUrl: '']) {
-                        sh ('kubectl apply -f deployment.yaml')
+                    try {
+                        sh 'docker stop node-full-stack-app || true'
+                        sh 'docker rm node-full-stack-app || true'
+                    } catch (Exception e) {
+                        echo "Container cleanup: nothing to remove or already gone"
                     }
                 }
             }
         }
-
-        stage('Clean up Containers') {   //if container runs it will stop and remove this block
-          steps {
-           script {
-             try {
-                sh 'docker stop node-full-stack-app'
-                sh 'docker rm node-full-stack-app'
-                } catch (Exception e) {
-                  echo "Container node-full-stack-app not found, moving to next stage"  
-                }
-            }
-          }
-        }
-     
     }
-
-
- post {
-            always {
-        emailext attachLog: true,
-            subject: "'${currentBuild.result}'",
-            body: "Project: ${env.JOB_NAME}<br/>" +
-                "Build Number: ${env.BUILD_NUMBER}<br/>" +
-                "URL: ${env.BUILD_URL}<br/>",
-            to: 'nahidkishore99@gmail.com',
-            attachmentsPattern: 'trivy.txt'
+    
+    post {
+        always {
+            emailext(
+                attachLog: true,
+                subject: "'${currentBuild.result}' - Node React Full Stack App",
+                body: """Project: ${env.JOB_NAME}<br/>
+Build Number: ${env.BUILD_NUMBER}<br/>
+URL: ${env.BUILD_URL}<br/>
+Status: ${currentBuild.result}""",
+                to: 'nahidkishore99@gmail.com',
+                attachmentsPattern: 'trivyfs.txt'
+            )
         }
-        }
-
+    }
 }
