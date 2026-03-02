@@ -18,16 +18,17 @@ pipeline {
             }
         }
         
-        stage('OWASP Dependency Check') {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./ --format ALL', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
+        // Temporarily disabled until OWASP plugin is installed
+        // stage('OWASP Dependency Check') {
+        //     steps {
+        //         dependencyCheck additionalArguments: '--scan ./ --format ALL', odcInstallation: 'DP-Check'
+        //         dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+        //     }
+        // }
         
         stage('TRIVY FS SCAN') {
             steps {
-                sh "trivy fs . > trivyfs.txt || true"  // non-fatal if trivy missing
+                sh 'trivy fs . > trivyfs.txt || echo "Trivy scan failed (non-fatal)"'
             }
         }
         
@@ -50,7 +51,28 @@ pipeline {
             }
         }
         
-        // ... rest of your stages (TRIVY image, deploy, cleanup) remain the same
+        stage('TRIVY Docker Image Scan') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh "trivy image --exit-code 0 --no-progress ${USER}/node-full-stack-app:latest"
+                }
+            }
+        }
+        
+        stage('Deploy to Docker Container') {
+            steps {
+                sh 'docker stop node-full-stack-app || true'
+                sh 'docker rm node-full-stack-app || true'
+                sh "docker run -d --name node-full-stack-app -p 4000:4000 ${USER}/node-full-stack-app:latest"
+            }
+        }
+        
+        stage('Clean up Containers') {
+            steps {
+                sh 'docker stop node-full-stack-app || true'
+                sh 'docker rm node-full-stack-app || true'
+            }
+        }
     }
     
     post {
@@ -58,7 +80,7 @@ pipeline {
             emailext(
                 attachLog: true,
                 subject: "${currentBuild.result} - Node React App #${BUILD_NUMBER}",
-                body: "Build: ${BUILD_URL}\nStatus: ${currentBuild.result}",
+                body: "Build URL: ${BUILD_URL}\nStatus: ${currentBuild.result}",
                 to: 'nahidkishore99@gmail.com',
                 attachmentsPattern: 'trivyfs.txt'
             )
