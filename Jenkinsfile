@@ -14,7 +14,8 @@ pipeline {
         
         stage('Git-Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/nahidkishore/Node-React-Full-Stack-App.git'
+                git branch: 'main', 
+                    url: 'https://github.com/nahidkishore/Node-React-Full-Stack-App.git'
             }
         }
         
@@ -28,7 +29,7 @@ pipeline {
         
         stage('TRIVY FS SCAN') {
             steps {
-                sh 'trivy fs . > trivyfs.txt || echo "Trivy scan failed (non-fatal)"'
+                sh 'trivy fs . > trivyfs.txt || echo "Trivy FS scan failed (non-fatal)"'
             }
         }
         
@@ -42,28 +43,50 @@ pipeline {
         }
         
         stage('Build and Push to Docker Hub') {
-    steps {
-        withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-            sh "docker build -t Prudhvi-dock-hub/node-full-stack-app:latest -f backend/Dockerfile ."
-            sh "docker login -u ${USER} -p ${PASS}"
-            sh "docker push Prudhvi-dock-hub/node-full-stack-app:latest"
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerHub',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh "docker build -t ${USER}/node-full-stack-app:latest -f backend/Dockerfile ."
+                    
+                    // Safer login using stdin (password not visible in logs)
+                    sh "echo \$PASS | docker login -u \$USER --password-stdin"
+                    
+                    sh "docker push ${USER}/node-full-stack-app:latest"
+                }
+            }
         }
-    }
-}
-
-stage('TRIVY Docker Image Scan') {
-    steps {
-        sh "trivy image --exit-code 0 --no-progress Prudhvi-dock-hub/node-full-stack-app:latest"
-    }
-}
-
-stage('Deploy to Docker Container') {
-    steps {
-        sh 'docker stop node-full-stack-app || true'
-        sh 'docker rm node-full-stack-app || true'
-        sh 'docker run -d --name node-full-stack-app -p 4000:4000 Prudhvi-dock-hub/node-full-stack-app:latest'
-    }
-}
+        
+        stage('TRIVY Docker Image Scan') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerHub',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh "trivy image --exit-code 0 --no-progress ${USER}/node-full-stack-app:latest || echo 'Trivy image scan failed (non-fatal)'"
+                }
+            }
+        }
+        
+        stage('Deploy to Docker Container') {
+            steps {
+                // Stop and remove old container if it exists
+                sh 'docker stop node-full-stack-app || true'
+                sh 'docker rm node-full-stack-app || true'
+                
+                // Run new container
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerHub',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh "docker run -d --name node-full-stack-app -p 4000:4000 ${USER}/node-full-stack-app:latest"
+                }
+            }
+        }
         
         stage('Clean up Containers') {
             steps {
@@ -77,8 +100,11 @@ stage('Deploy to Docker Container') {
         always {
             emailext(
                 attachLog: true,
-                subject: "${currentBuild.result} - Node React App #${BUILD_NUMBER}",
-                body: "Build URL: ${BUILD_URL}\nStatus: ${currentBuild.result}",
+                subject: "${currentBuild.result} - Node React App Build #${BUILD_NUMBER}",
+                body: """Project: ${JOB_NAME}
+Build Number: ${BUILD_NUMBER}
+Status: ${currentBuild.result}
+Build URL: ${BUILD_URL}""",
                 to: 'nahidkishore99@gmail.com',
                 attachmentsPattern: 'trivyfs.txt'
             )
