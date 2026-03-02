@@ -43,51 +43,35 @@ pipeline {
         }
         
         stage('Build and Push to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerHub',
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh "docker build -t ${USER}/node-full-stack-app:latest -f backend/Dockerfile ."
-                    
-                    // Safer login using stdin (password not visible in logs)
-                    sh "echo \$PASS | docker login -u \$USER --password-stdin"
-                    
-                    sh "docker push ${USER}/node-full-stack-app:latest"
-                }
-            }
+    steps {
+        withCredentials([usernamePassword(
+            credentialsId: 'dockerHub',
+            usernameVariable: 'USER',
+            passwordVariable: 'PASS'
+        )]) {
+            sh "docker build -t ${USER}/node-full-stack-app:latest -f backend/Dockerfile ."
+            
+            // Safer login (password not in logs)
+            sh "echo \$PASS | docker login -u \$USER --password-stdin"
+            
+            sh "docker push ${USER}/node-full-stack-app:latest"
         }
-        
-        stage('TRIVY Docker Image Scan') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerHub',
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh "trivy image --exit-code 0 --no-progress ${USER}/node-full-stack-app:latest || echo 'Trivy image scan failed (non-fatal)'"
-                }
-            }
-        }
-        
-        stage('Deploy to Docker Container') {
-            steps {
-                // Stop and remove old container if it exists
-                sh 'docker stop node-full-stack-app || true'
-                sh 'docker rm node-full-stack-app || true'
-                
-                // Run new container
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerHub',
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh "docker run -d --name node-full-stack-app -p 4000:4000 ${USER}/node-full-stack-app:latest"
-                }
-            }
-        }
-        
+    }
+}
+
+stage('TRIVY Docker Image Scan') {
+    steps {
+        sh "trivy image --exit-code 0 --no-progress prudhvi0103/node-full-stack-app:latest || echo 'Trivy image scan failed (non-fatal)'"
+    }
+}
+
+stage('Deploy to Docker Container') {
+    steps {
+        sh 'docker stop node-full-stack-app || true'
+        sh 'docker rm node-full-stack-app || true'
+        sh 'docker run -d --name node-full-stack-app -p 4000:4000 prudhvi0103/node-full-stack-app:latest'
+    }
+}
         stage('Clean up Containers') {
             steps {
                 sh 'docker stop node-full-stack-app || true'
