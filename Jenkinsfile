@@ -2,6 +2,7 @@ pipeline {
     agent any
     tools{
         nodejs 'node16'
+            sonar-scanner 'sonar-scanner'
     }
     environment{
         SCANNER_HOME= tool 'sonar-scanner'
@@ -25,15 +26,13 @@ pipeline {
 
         
 
-         stage("Sonarqube Analysis "){
-            steps{
-                withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=full-stack-app \
-                    -Dsonar.sources=. \
-                    -Dsonar.projectKey=full-stack-app '''
-                }
+         stage('SonarQube analysis') {
+        steps {
+            withSonarQubeEnv('SonarQube') {  // server name
+                sh 'sonar-scanner'   // or sonar-scanner.bat on Windows
             }
         }
+    }
 
         stage("SonarQube Quality Gate"){
        
